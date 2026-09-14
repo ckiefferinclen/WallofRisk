@@ -1,0 +1,3 @@
+series,date,value
+# Replace this file with an authorized RCA/MSCI export normalized to series,date,value.
+# Supported series keys are listed in config/metrics.yml.

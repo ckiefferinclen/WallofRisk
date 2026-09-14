@@ -1,0 +1,7 @@
+streamlit>=1.39
+pandas>=2.2
+numpy>=2.0
+plotly>=5.24
+requests>=2.32
+PyYAML>=6.0
+openpyxl>=3.1

@@ -1,0 +1,21 @@
+name: Dashboard health check
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 12 * * 1-5"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app.py connectors/public_data.py connectors/rca.py
+      - run: python - <<'PY'
+        from connectors.public_data import fred_series
+        x=fred_series('DGS10')
+        assert not x.empty
+        print(x.tail(1).to_string(index=False))
+        PY
