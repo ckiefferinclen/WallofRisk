@@ -1,73 +1,84 @@
 from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 import requests
 import pandas as pd
 
-# Geography-enabled Census import-by-port endpoint.
 BASE = "https://api.census.gov/data/timeseries/intltrade/imports/porthsimport"
 FIELDS = "NAME,GEN_VAL_MO,CNT_VAL_MO,CNT_WGT_MO,VES_WGT_MO,YEAR,MONTH"
-HEADERS = {"User-Agent": "cre-leading-indicators/4.0"}
+HEADERS = {"User-Agent": "cre-leading-indicators/5.0"}
+
+# Customs districts containing the major U.S. container gateways. Limiting the
+# query to these districts avoids thousands of serial API calls.
+DISTRICTS = {
+    "10": "New York",
+    "13": "Baltimore",
+    "14": "Norfolk",
+    "16": "Charleston",
+    "17": "Savannah",
+    "27": "Los Angeles",
+    "28": "San Francisco",
+    "30": "Seattle",
+    "53": "Houston",
+    "18": "Tampa",
+    "52": "Miami",
+}
 
 
-def _periods(months: int = 48):
+def _periods(months: int = 30):
     y, m = date.today().year, date.today().month
     for offset in range(months):
         n = m - offset
         yield f"{y + (n - 1) // 12:04d}-{(n - 1) % 12 + 1:02d}"
 
 
-def _query(period: str, api_key: str) -> pd.DataFrame:
+def _fetch_one(period: str, district: str, api_key: str) -> pd.DataFrame:
+    params = {
+        "get": FIELDS,
+        "for": "port:*",
+        "in": f"customs district:{district}",
+        "time": period,
+        "I_COMMODITY": "TOTAL",
+        "key": api_key,
+    }
+    response = requests.get(BASE, params=params, headers=HEADERS, timeout=25)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list) or len(payload) < 2:
+        return pd.DataFrame()
+    frame = pd.DataFrame(payload[1:], columns=payload[0])
+    frame["date"] = pd.Timestamp(period + "-01")
+    return frame
+
+
+def monthly_port_trade(api_key: str | None = None, months: int = 30) -> pd.DataFrame:
+    """Return recent monthly trade activity for major U.S. container ports.
+
+    Requests are limited to major gateway customs districts and run concurrently.
+    This keeps a Streamlit refresh bounded instead of making thousands of serial
+    calls across every customs district and month.
+    """
     if not api_key:
-        raise RuntimeError("CENSUS_API_KEY is required by the Census International Trade API")
+        raise RuntimeError("CENSUS_API_KEY is required")
 
-    # First try all customs districts in one geography request. If the API
-    # rejects the wildcard parent geography, fall back to individual districts.
-    parent_scopes = ["customs district:*"] + [f"customs district:{i:02d}" for i in range(1, 56)]
-    frames = []
-    for scope in parent_scopes:
-        params = {
-            "get": FIELDS,
-            "for": "port:*",
-            "in": scope,
-            "time": period,
-            "I_COMMODITY": "TOTAL",
-            "key": api_key,
-        }
-        try:
-            response = requests.get(BASE, params=params, headers=HEADERS, timeout=45)
-            response.raise_for_status()
-            payload = response.json()
-            if isinstance(payload, list) and len(payload) > 1:
-                frame = pd.DataFrame(payload[1:], columns=payload[0])
-                frames.append(frame)
-                if scope == "customs district:*":
-                    break
-        except Exception:
-            if scope == "customs district:*":
-                continue
+    jobs = [(period, district) for period in _periods(months) for district in DISTRICTS]
+    frames, errors = [], []
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        futures = {pool.submit(_fetch_one, period, district, api_key): (period, district) for period, district in jobs}
+        for future in as_completed(futures):
+            period, district = futures[future]
+            try:
+                frame = future.result()
+                if not frame.empty:
+                    frames.append(frame)
+            except Exception as exc:
+                errors.append(f"{period}/{district}: {exc}")
+
     if not frames:
-        raise RuntimeError(f"No Census port rows returned for {period}")
-    return pd.concat(frames, ignore_index=True).drop_duplicates()
+        detail = errors[0] if errors else "no rows returned"
+        raise RuntimeError(f"Census port feed returned no data: {detail}")
 
-
-def monthly_port_trade(api_key: str | None = None, months: int = 48) -> pd.DataFrame:
-    """Return monthly U.S. import activity by port from the Census Trade API."""
-    frames = []
-    misses = 0
-    for period in _periods(months):
-        try:
-            frame = _query(period, api_key or "")
-            frame["date"] = pd.Timestamp(period + "-01")
-            frames.append(frame)
-            misses = 0
-        except Exception:
-            misses += 1
-            if frames and misses >= 4:
-                break
-    if not frames:
-        raise RuntimeError("Census port feed returned no data. Verify CENSUS_API_KEY is active in Streamlit secrets.")
-
-    raw = pd.concat(frames, ignore_index=True)
+    raw = pd.concat(frames, ignore_index=True).drop_duplicates()
     raw["port"] = raw["NAME"].astype(str).str.strip()
     mapping = {
         "CNT_VAL_MO": "container_value",
@@ -85,5 +96,8 @@ def monthly_port_trade(api_key: str | None = None, months: int = 48) -> pd.DataF
         vessel_weight=("vessel_weight", "sum"),
         general_import_value=("general_import_value", "sum"),
     )
+    if out.empty:
+        raise RuntimeError("Census returned rows but no numeric port measures")
     out.attrs["feed"] = "U.S. Census International Trade API"
+    out.attrs["partial_errors"] = len(errors)
     return out.sort_values(["date", "port"])
