@@ -1,88 +1,50 @@
 from __future__ import annotations
-import io, re, requests, pandas as pd
+from datetime import date
+import requests
+import pandas as pd
 
-CATALOG = "https://api.us.socrata.com/api/catalog/v1"
-DOMAIN = "data.bts.gov"
-TABLEAU_CSV = "https://explore.dot.gov/t/BTS/views/MonthlyTEUDashboardNew_17697067597260/MonthlyData.csv?:showVizHome=no"
-HEADERS = {"User-Agent": "Mozilla/5.0 CRE-leading-indicators/1.0"}
+BASE = "https://api.census.gov/data/timeseries/intltrade/imports/porths"
+FIELDS = "PORT,PORT_NAME,CNT_VAL_MO,CNT_WGT_MO,VES_WGT_MO,GEN_VAL_MO,LAST_UPDATE"
+HEADERS = {"User-Agent": "cre-leading-indicators/3.0"}
 
-PORT_ALIASES = {
- "charleston":"Charleston, SC","houston":"Houston, TX","long beach":"Long Beach, CA",
- "los angeles":"Los Angeles, CA","nwsa":"Seattle/Tacoma, WA","seattle":"Seattle/Tacoma, WA",
- "tacoma":"Seattle/Tacoma, WA","oakland":"Oakland, CA","new york":"New York/New Jersey",
- "ny/nj":"New York/New Jersey","ny & nj":"New York/New Jersey","virginia":"Virginia",
- "savannah":"Savannah, GA","jacksonville":"Jacksonville, FL","miami":"Miami, FL"
-}
+def _periods(months=48):
+    y, m = date.today().year, date.today().month
+    for offset in range(months):
+        n = m - offset
+        yield f"{y + (n-1)//12:04d}-{(n-1)%12+1:02d}"
 
-def _port(v):
- t=re.sub(r"\s+"," ",str(v)).strip(); low=t.lower()
- for k,label in PORT_ALIASES.items():
-  if k in low:return label
- return None
+def _fetch(period, api_key=None):
+    attempts = [
+        {"time": period, "I_COMMODITY": "TOTAL", "CTY_CODE": "-"},
+        {"time": period, "I_COMMODITY": "TOTAL", "CTY_CODE": "0"},
+        {"time": period, "I_COMMODITY": "TOTAL"},
+    ]
+    errors=[]
+    for extra in attempts:
+        params={"get":FIELDS, **extra}
+        if api_key: params["key"]=api_key
+        try:
+            r=requests.get(BASE,params=params,headers=HEADERS,timeout=45)
+            r.raise_for_status(); payload=r.json()
+            if isinstance(payload,list) and len(payload)>1:
+                return pd.DataFrame(payload[1:],columns=payload[0])
+        except Exception as exc: errors.append(str(exc))
+    raise RuntimeError(f"No Census port rows for {period}: {' | '.join(errors[:2])}")
 
-def _date(s):
- text=s.astype(str).str.strip().str.replace(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ]",lambda m:m.group(1)+" ",regex=True)
- return pd.to_datetime(text,errors="coerce")
-
-def _num(s):return pd.to_numeric(s.astype(str).str.replace(",","",regex=False).str.replace(r"[^0-9.\-]","",regex=True),errors="coerce")
-
-def _parse(df):
- if df.empty:raise ValueError("empty table")
- df.columns=[str(c).strip() for c in df.columns]; low={c:c.lower() for c in df.columns}
- # long format
- pc=next((c for c,l in low.items() if "port" in l and "airport" not in l),None)
- dc=next((c for c,l in low.items() if any(k in l for k in ("date","month","period"))),None)
- vc=next((c for c,l in low.items() if "teu" in l and not any(k in l for k in ("port","date","month","rank","share"))),None)
- if pc and dc and vc:
-  out=pd.DataFrame({"date":_date(df[dc]),"port":df[pc].map(_port),"value":_num(df[vc])}).dropna()
-  if not out.empty:return out.groupby(["date","port"],as_index=False).value.sum()
- # wide format, date field may be misleadingly named Port in the old and some current tables
- best=None;count=0
- for c in df.columns:
-  q=_date(df[c]);n=q.notna().sum()
-  if n>count:best,count=c,n
- if best and count>=3:
-  work=df.copy();work["date"]=_date(work[best]); cols=[c for c in df.columns if c!=best and _port(c)]
-  if cols:
-   out=work[["date"]+cols].melt("date",var_name="port",value_name="value");out["port"]=out.port.map(_port);out["value"]=_num(out.value)
-   out=out.dropna()
-   if not out.empty:return out.groupby(["date","port"],as_index=False).value.sum()
- raise ValueError("unrecognized columns: "+", ".join(df.columns))
-
-def _socrata_candidates():
- params={"search_context":DOMAIN,"q":"monthly TEU port container","limit":100}
- r=requests.get(CATALOG,params=params,headers=HEADERS,timeout=45);r.raise_for_status()
- found=[]
- for item in r.json().get("results",[]):
-  res=item.get("resource",{}); rid=res.get("id"); typ=res.get("type","")
-  title=(res.get("name") or "").lower(); desc=(res.get("description") or "").lower()
-  if rid and typ in ("dataset","filter") and "teu" in title+desc:
-   found.append((rid,res.get("name",rid)))
- return found
-
-def _from_socrata():
- good=[]; errors=[]
- for rid,title in _socrata_candidates():
-  try:
-   url=f"https://{DOMAIN}/resource/{rid}.json?$limit=50000"
-   r=requests.get(url,headers=HEADERS,timeout=60);r.raise_for_status();out=_parse(pd.DataFrame(r.json()))
-   if not out.empty:good.append((out.date.max(),rid,title,out))
-  except Exception as e:errors.append(f"{rid}: {e}")
- if not good:raise RuntimeError("No current Socrata TEU dataset parsed. "+"; ".join(errors[:5]))
- good.sort(key=lambda x:x[0],reverse=True);latest,rid,title,out=good[0]
- # Never silently serve the known stale 2022 asset or another stale result.
- if latest.year<2024:raise RuntimeError(f"Newest Socrata TEU result ({rid}, {title}) ends {latest.date()}")
- out.attrs.update(feed=f"BTS Socrata {rid}: {title}",dataset_id=rid,stale_fallback=False);return out
-
-def _from_tableau():
- r=requests.get(TABLEAU_CSV,headers=HEADERS,timeout=90);r.raise_for_status();out=_parse(pd.read_csv(io.BytesIO(r.content)))
- if out.empty or out.date.max().year<2024:raise RuntimeError(f"Tableau export ends {out.date.max() if not out.empty else 'empty'}")
- out.attrs.update(feed="BTS current Monthly TEU dashboard",dataset_id="MonthlyTEUDashboardNew",stale_fallback=False);return out
-
-def monthly_teu():
- """Discover the newest public BTS TEU dataset; never fall back to 2022 data."""
- errors=[]
- for loader in (_from_socrata,_from_tableau):
-  try:return loader().sort_values(["date","port"])[["date","port","value"]]
-  except Exception as e:errors.append(str(e))
- raise RuntimeError("Current BTS TEU data unavailable. "+" | ".join(errors))
+def monthly_port_trade(api_key=None, months=48):
+    frames=[]; consecutive_misses=0
+    for period in _periods(months):
+        try:
+            x=_fetch(period,api_key); x["date"]=pd.Timestamp(period+"-01"); frames.append(x); consecutive_misses=0
+        except Exception:
+            consecutive_misses += 1
+            if frames and consecutive_misses>=4: break
+    if not frames: raise RuntimeError("Census International Trade API returned no monthly port data")
+    x=pd.concat(frames,ignore_index=True)
+    x["port"]=x["PORT_NAME"].astype(str).str.strip()
+    for old,new in [("CNT_VAL_MO","container_value"),("CNT_WGT_MO","container_weight"),("VES_WGT_MO","vessel_weight"),("GEN_VAL_MO","general_import_value")]:
+        x[new]=pd.to_numeric(x.get(old),errors="coerce")
+    x=x.dropna(subset=["date","port","container_value"])
+    out=x.groupby(["date","port"],as_index=False).agg(container_value=("container_value","sum"),container_weight=("container_weight","sum"),vessel_weight=("vessel_weight","sum"),general_import_value=("general_import_value","sum"))
+    out.attrs["feed"]="U.S. Census International Trade API"
+    return out.sort_values(["date","port"])
