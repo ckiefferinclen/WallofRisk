@@ -1,5 +1,4 @@
 metrics:
-  # Page 1
   - {name: 10-year Treasury, page: CRE Macro Signal Board, source: fred, series: DGS10, unit: "%", frequency: daily, rule: lower_supportive, warn: 4.5, danger: 5.0, weight: 1.3}
   - {name: Yield-curve spread, page: CRE Macro Signal Board, source: fred, series: T10Y2Y, unit: "pp", frequency: daily, rule: higher_supportive, warn: 0.0, danger: -0.5, weight: 0.8}
   - {name: Commercial mortgage rate, page: CRE Macro Signal Board, source: rca, series: commercial_mortgage_rate, unit: "%", frequency: monthly, rule: lower_supportive, warn: 6.5, danger: 7.5, weight: 1.3}
@@ -12,7 +11,6 @@ metrics:
   - {name: CRE transaction volume, page: CRE Macro Signal Board, source: rca, series: cre_transaction_volume, unit: "$bn", frequency: monthly, rule: momentum_higher, warn: -0.05, danger: -0.15, weight: 1.2}
   - {name: CRE distress, page: CRE Macro Signal Board, source: rca, series: cre_distress, unit: "$bn", frequency: monthly, rule: momentum_lower, warn: 0.10, danger: 0.25, weight: 1.2}
   - {name: Composite macro signal, page: CRE Macro Signal Board, source: derived, series: composite, unit: score, frequency: current, rule: composite, warn: -0.25, danger: -0.55, weight: 0}
-  # Page 2
   - {name: Industrial production, page: Industrial Demand, source: fred, series: INDPRO, unit: index, frequency: monthly, rule: momentum_higher, warn: -0.01, danger: -0.03, weight: 1.2}
   - {name: Manufacturing new orders, page: Industrial Demand, source: fred, series: AMTMNO, unit: "$mm", frequency: monthly, rule: momentum_higher, warn: -0.02, danger: -0.07, weight: 1.0}
   - {name: Core capital-goods orders, page: Industrial Demand, source: fred, series: NEWORDER, unit: "$mm", frequency: monthly, rule: momentum_higher, warn: -0.02, danger: -0.07, weight: 1.1}
@@ -22,21 +20,19 @@ metrics:
   - {name: Inventory-to-sales ratio, page: Industrial Demand, source: fred, series: ISRATIO, unit: ratio, frequency: monthly, rule: balanced, warn: 0, danger: 0, weight: 0.6}
   - {name: Container throughput, page: Industrial Demand, source: export, series: container_throughput, unit: TEUs, frequency: monthly, rule: momentum_higher, warn: -0.03, danger: -0.10, weight: 1.0}
   - {name: Diesel prices, page: Industrial Demand, source: fred, series: GASDESW, unit: "$/gal", frequency: weekly, rule: momentum_lower, warn: 0.10, danger: 0.25, weight: 0.7}
-  # Page 3
   - {name: Office-using employment, page: Office Demand, source: derived, series: office_employment, unit: thousands, frequency: monthly, rule: momentum_higher, warn: -0.01, danger: -0.03, weight: 1.6}
   - {name: Job openings, page: Office Demand, source: fred, series: JTSJOL, unit: thousands, frequency: monthly, rule: momentum_higher, warn: -0.05, danger: -0.15, weight: 0.8}
   - {name: Initial claims, page: Office Demand, source: fred, series: ICSA, unit: claims, frequency: weekly, rule: momentum_lower, warn: 0.10, danger: 0.25, weight: 0.8}
   - {name: Business investment, page: Office Demand, source: fred, series: PNFI, unit: "$bn", frequency: quarterly, rule: momentum_higher, warn: 0.00, danger: -0.04, weight: 0.7}
   - {name: Corporate profits, page: Office Demand, source: fred, series: CP, unit: "$bn", frequency: quarterly, rule: momentum_higher, warn: 0.00, danger: -0.08, weight: 0.7}
-  - {name: CEO or small-business confidence, page: Office Demand, source: fred, series: NFIB, unit: index, frequency: monthly, rule: higher_supportive, warn: 95, danger: 90, weight: 0.7}
+  - {name: Business confidence, page: Office Demand, source: fred, series: BSCICP02USM460S, unit: percent, frequency: monthly, rule: higher_supportive, warn: 0, danger: -10, weight: 0.7}
   - {name: Office delinquencies/distress, page: Office Demand, source: rca, series: office_distress, unit: "%", frequency: monthly, rule: momentum_lower, warn: 0.10, danger: 0.25, weight: 1.5}
   - {name: Office transaction volume, page: Office Demand, source: rca, series: office_transaction_volume, unit: "$bn", frequency: monthly, rule: momentum_higher, warn: -0.05, danger: -0.15, weight: 1.4}
   - {name: Public office REIT pricing relative to asset value, page: Office Demand, source: export, series: office_reit_nav, unit: "%", frequency: monthly, rule: higher_supportive, warn: -0.15, danger: -0.30, weight: 0.8}
-  # Page 4
   - {name: Economic Policy Uncertainty Index, page: Risk Monitor, source: fred, series: USEPUINDXD, unit: index, frequency: daily, rule: momentum_lower, warn: 0.10, danger: 0.30, weight: 1.0}
-  - {name: Trade Policy Uncertainty Index, page: Risk Monitor, source: export, series: trade_policy_uncertainty, unit: index, frequency: monthly, rule: momentum_lower, warn: 0.10, danger: 0.30, weight: 0.9}
+  - {name: Trade Policy Uncertainty Index, page: Risk Monitor, source: fred, series: EPUTRADE, unit: index, frequency: monthly, rule: momentum_lower, warn: 0.10, danger: 0.30, weight: 0.9}
   - {name: Effective tariff rate, page: Risk Monitor, source: export, series: effective_tariff_rate, unit: "%", frequency: monthly, rule: momentum_lower, warn: 0.10, danger: 0.30, weight: 0.9}
-  - {name: Freight disruption, page: Risk Monitor, source: fred, series: GSCPI, unit: index, frequency: monthly, rule: lower_supportive, warn: 1.0, danger: 2.0, weight: 0.9}
+  - {name: Freight activity, page: Risk Monitor, source: fred, series: FRGSHPUSM649NCIS, unit: index, frequency: monthly, rule: momentum_higher, warn: -0.03, danger: -0.10, weight: 0.9}
   - {name: Energy-price shock, page: Risk Monitor, source: derived, series: energy_shock, unit: z-score, frequency: weekly, rule: lower_supportive, warn: 1.0, danger: 2.0, weight: 0.8}
   - {name: Bank lending standards, page: Risk Monitor, source: fred, series: DRTSCILM, unit: net_percent, frequency: quarterly, rule: lower_supportive, warn: 20, danger: 40, weight: 1.2}
   - {name: Upcoming CRE loan maturities, page: Risk Monitor, source: rca, series: cre_loan_maturities, unit: "$bn", frequency: quarterly, rule: balanced, warn: 0, danger: 0, weight: 0.8}
