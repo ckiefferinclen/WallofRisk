@@ -4,24 +4,24 @@ from datetime import date
 import requests
 import pandas as pd
 
-# Stable Census International Trade "imports by port" endpoint.
 BASE = "https://api.census.gov/data/timeseries/intltrade/imports/porths"
 FIELDS = "PORT,PORT_NAME,CNT_VAL_MO,CNT_WGT_MO,VES_WGT_MO,GEN_VAL_MO,LAST_UPDATE"
-HEADERS = {"User-Agent": "cre-leading-indicators/6.0"}
+HEADERS = {"User-Agent": "cre-leading-indicators/7.0"}
 
-# Major U.S. container gateways and their Census customs port codes.
-PORTS = {
-    "1001": "New York, NY",
-    "1401": "Norfolk, VA",
-    "1601": "Charleston, SC",
-    "1703": "Savannah, GA",
-    "2704": "Los Angeles, CA",
-    "2709": "Long Beach, CA",
-    "2811": "Oakland, CA",
-    "3001": "Seattle, WA",
-    "3002": "Tacoma, WA",
-    "5301": "Houston, TX",
+# Census Schedule D ports grouped into economically comparable gateway markets.
+# 2704 is already the combined Los Angeles/Long Beach Seaport, so 2709 is
+# deliberately excluded to prevent double counting Long Beach.
+GATEWAYS = {
+    "Los Angeles / Long Beach": ["2704"],
+    "New York / New Jersey": ["1001", "1003", "1004"],
+    "Seattle / Tacoma": ["3001", "3002"],
+    "Norfolk / Virginia": ["1401"],
+    "Charleston": ["1601"],
+    "Savannah": ["1703"],
+    "Oakland": ["2811"],
+    "Houston": ["5301"],
 }
+PORT_TO_GATEWAY = {code: gateway for gateway, codes in GATEWAYS.items() for code in codes}
 
 
 def _periods(months: int = 15):
@@ -32,12 +32,7 @@ def _periods(months: int = 15):
 
 
 def _fetch(period: str, port_code: str, api_key: str) -> pd.DataFrame:
-    params = {
-        "get": FIELDS,
-        "time": period,
-        "PORT": port_code,
-        "key": api_key,
-    }
+    params = {"get": FIELDS, "time": period, "PORT": port_code, "key": api_key}
     response = requests.get(BASE, params=params, headers=HEADERS, timeout=12)
     response.raise_for_status()
     payload = response.json()
@@ -45,20 +40,17 @@ def _fetch(period: str, port_code: str, api_key: str) -> pd.DataFrame:
         return pd.DataFrame()
     frame = pd.DataFrame(payload[1:], columns=payload[0])
     frame["date"] = pd.Timestamp(period + "-01")
-    frame["port"] = PORTS[port_code]
+    frame["port_code"] = port_code
+    frame["port"] = PORT_TO_GATEWAY[port_code]
     return frame
 
 
 def monthly_port_trade(api_key: str | None = None, months: int = 15) -> pd.DataFrame:
-    """Return 15 recent months for ten major container gateways.
-
-    The bounded request set supplies current, prior-month, three-month and
-    year-over-year dashboard comparisons without blocking Streamlit startup.
-    """
+    """Return recent monthly trade activity grouped by major port gateway."""
     if not api_key:
         raise RuntimeError("CENSUS_API_KEY is required")
 
-    jobs = [(period, code) for period in _periods(months) for code in PORTS]
+    jobs = [(period, code) for period in _periods(months) for code in PORT_TO_GATEWAY]
     frames, errors = [], []
     with ThreadPoolExecutor(max_workers=20) as pool:
         futures = {pool.submit(_fetch, period, code, api_key): (period, code) for period, code in jobs}
@@ -85,6 +77,8 @@ def monthly_port_trade(api_key: str | None = None, months: int = 15) -> pd.DataF
         raw[target] = pd.to_numeric(raw.get(source), errors="coerce")
 
     raw = raw.dropna(subset=["date", "port", "container_value"])
+    # This is where Newark and Perth Amboy are combined with New York, and
+    # Seattle is combined with Tacoma. LA/LB remains a single 2704 gateway.
     out = raw.groupby(["date", "port"], as_index=False).agg(
         container_value=("container_value", "sum"),
         container_weight=("container_weight", "sum"),
@@ -92,7 +86,8 @@ def monthly_port_trade(api_key: str | None = None, months: int = 15) -> pd.DataF
         general_import_value=("general_import_value", "sum"),
     )
     if out.empty:
-        raise RuntimeError("Census returned rows but no numeric port measures")
+        raise RuntimeError("Census returned rows but no numeric gateway measures")
     out.attrs["feed"] = "U.S. Census International Trade API"
     out.attrs["partial_errors"] = len(errors)
+    out.attrs["gateway_method"] = "Schedule D ports grouped into gateway markets"
     return out.sort_values(["date", "port"])
