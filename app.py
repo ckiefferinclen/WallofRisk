@@ -8,8 +8,12 @@ PAGES=['CRE Macro Signal Board','Industrial Demand','Office Demand','Risk Monito
 @st.cache_data(ttl=21600,show_spinner=False)
 def config():
  ms=yaml.safe_load(Path('config/metrics.yml').read_text())['metrics']
- # Runtime migration means metrics.yml does not need manual editing for this release.
+ # Guard against an older configuration during deployment.
+ ms=[m for m in ms if m.get('series') not in ('cre_distress','office_distress')]
+ if not any(m.get('series')=='industrial_transaction_volume' for m in ms):
+  ms.append({'name':'Industrial transaction volume','page':'Industrial Demand','source':'rca','series':'industrial_transaction_volume','unit':'$bn','frequency':'monthly','rule':'momentum_higher','warn':-.05,'danger':-.15,'weight':1.2,'definition':'Monthly dollar value of U.S. industrial transactions captured by RCA/MSCI.'})
  for m in ms:
+  if m.get('series') in ('industrial_cap_rate','office_cap_rate','cap_treasury_spread'):m['frequency']='monthly'
   if m.get('series')=='BTS_TOTAL_TEU' or m.get('name')=='Major U.S. port TEU throughput':
    m.update(name='Major U.S. port containerized import value',source='census_port',series='CENSUS_PORT_IMPORT_VALUE',unit='$bn',frequency='monthly',rule='momentum_higher',warn=-.03,danger=-.10,weight=1.0,definition='Combined monthly value of containerized vessel imports reported by the U.S. Census International Trade API across U.S. ports.')
  return ms
